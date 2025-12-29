@@ -2,55 +2,49 @@ package main
 
 import (
 	"fmt"
-	"html/template"
-	"log"
 	"net/http"
-	"path/filepath"
 
 	chi "github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/lowsound42/lenslocked/controllers"
+	"github.com/lowsound42/lenslocked/models"
+	"github.com/lowsound42/lenslocked/templates"
+	"github.com/lowsound42/lenslocked/views"
 )
 
-func homeHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	tpl, err := template.ParseFiles(filepath.Join("templates", "home.gohtml"))
-	if err != nil {
-		log.Printf("parsing template: %v", err)
-		http.Error(w, "There was an error parsing the template", http.StatusInternalServerError)
-		return
-	}
-	err = tpl.Execute(w, nil)
-	if err != nil {
-		panic(err) // TODO remove
-	}
-}
-
-func contactHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, "<h1>Contact Page</h1><p>Get in touch at <a href=\"mailto:omar@lowsound.dev\">omar@lowsound.dev</a></p>")
-}
-
-func faqHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, "<h1>Frequently Asked Questions</h1><p>FAQ content goes here</p>")
-}
-
-func testHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	id := chi.URLParam(r, "id")
-	fmt.Fprintf(w, "<h1>Test Page</h1><p>ID: %s</p>", id)
-}
-
 func main() {
+	cfg := models.DefaultPostgresConfig()
+	db, err := models.Open(cfg)
+	if err != nil {
+		panic(err)
+	}
+	defer db.Close()
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
-	r.Get("/", homeHandler)
-	r.Get("/contact", contactHandler)
-	r.Get("/faq", faqHandler)
-	r.Get("/test/{id}", testHandler)
+	userService := models.UserService{
+		DB: db,
+	}
+
+	// Setup our controllers
+	usersC := controllers.Users{
+		UserService: &userService,
+	}
+	usersC.Templates.New = views.Must(views.ParseFS(
+		templates.FS, "signup.gohtml", "tailwind.gohtml"))
+	usersC.Templates.SignIn = views.Must(views.ParseFS(
+		templates.FS, "signin.gohtml", "tailwind.gohtml"))
+	r.Get("/", controllers.StaticHandler(views.Must(
+		views.ParseFS(templates.FS, "home.gohtml", "tailwind.gohtml"))))
+	r.Get("/contact", controllers.StaticHandler(views.Must(
+		views.ParseFS(templates.FS, "contact.gohtml", "tailwind.gohtml"))))
+	r.Get("/faq", controllers.FAQ(
+		views.Must(views.ParseFS(templates.FS, "faq.gohtml", "tailwind.gohtml"))))
+	r.Get("/signup", usersC.New)
+	r.Get("/signin", usersC.SignIn)
+	r.Post("/signup", usersC.Create)
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Page not found", http.StatusNotFound)
 	})
-	fmt.Println("Starting server on :3000")
+	fmt.Println("Starting the server on :3000...")
 	http.ListenAndServe(":3000", r)
 }
