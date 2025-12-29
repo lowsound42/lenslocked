@@ -3,9 +3,12 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"os"
 
 	chi "github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/gorilla/csrf"
+	"github.com/joho/godotenv"
 	"github.com/lowsound42/lenslocked/controllers"
 	"github.com/lowsound42/lenslocked/models"
 	"github.com/lowsound42/lenslocked/templates"
@@ -13,6 +16,7 @@ import (
 )
 
 func main() {
+	err := godotenv.Load()
 	cfg := models.DefaultPostgresConfig()
 	db, err := models.Open(cfg)
 	if err != nil {
@@ -42,9 +46,17 @@ func main() {
 	r.Get("/signup", usersC.New)
 	r.Get("/signin", usersC.SignIn)
 	r.Post("/signup", usersC.Create)
+	r.Post("/signin", usersC.ProcessSignIn)
+	r.Get("/users/me", usersC.CurrentUser)
+
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Page not found", http.StatusNotFound)
 	})
 	fmt.Println("Starting the server on :3000...")
-	http.ListenAndServe(":3000", r)
+	csrfKey := os.Getenv("CSRF_KEY")
+	csrfMw := csrf.Protect(
+		[]byte(csrfKey),
+		csrf.Secure(false),
+	)
+	http.ListenAndServe(":3000", csrfMw(r))
 }
