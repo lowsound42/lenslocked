@@ -61,6 +61,7 @@ func (u Users) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (u Users) ProcessSignIn(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("HELPHELPHELP")
 	var data struct {
 		Email    string
 		Password string
@@ -103,4 +104,20 @@ func (u Users) CurrentUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fmt.Fprintf(w, "Current user: %s\n", user.Email)
+}
+
+func (u Users) ProcessSignOut(w http.ResponseWriter, r *http.Request) {
+	token, err := readCookie(r, CookieSession)
+	if err != nil {
+		http.Redirect(w, r, "/signin", http.StatusFound)
+		return
+	}
+	err = u.SessionService.Delete(token)
+	if err != nil {
+		fmt.Println(err)
+		http.Error(w, "Something went wrong.", http.StatusInternalServerError)
+		return
+	}
+	// TODO: Delete the user's cookie
+	http.Redirect(w, r, "/signin", http.StatusFound)
 }
