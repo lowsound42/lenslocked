@@ -5,8 +5,14 @@ import (
 	"html/template"
 	"net/http"
 
+	"github.com/lowsound42/lenslocked/context"
+
 	"github.com/lowsound42/lenslocked/models"
 )
+
+type UserMiddleware struct {
+	SessionService *models.SessionService
+}
 
 type Users struct {
 	Templates struct {
@@ -61,7 +67,6 @@ func (u Users) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (u Users) ProcessSignIn(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("HELPHELPHELP")
 	var data struct {
 		Email    string
 		Password string
@@ -91,15 +96,8 @@ func (u Users) ProcessSignIn(w http.ResponseWriter, r *http.Request) {
 }
 
 func (u Users) CurrentUser(w http.ResponseWriter, r *http.Request) {
-	tokenCookie, err := r.Cookie("session")
-	if err != nil {
-		fmt.Println(err)
-		http.Redirect(w, r, "/signin", http.StatusFound)
-		return
-	}
-	user, err := u.SessionService.User(tokenCookie.Value)
-	if err != nil {
-		fmt.Println(err)
+	user := context.User(r.Context())
+	if user == nil {
 		http.Redirect(w, r, "/signin", http.StatusFound)
 		return
 	}
@@ -118,6 +116,48 @@ func (u Users) ProcessSignOut(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Something went wrong.", http.StatusInternalServerError)
 		return
 	}
-	// TODO: Delete the user's cookie
+	deleteCookie(w, CookieSession)
 	http.Redirect(w, r, "/signin", http.StatusFound)
+}
+
+func (umw UserMiddleware) SetUser(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token, err := readCookie(r, CookieSession)
+		if err != nil {
+			// Cannot lookup the user with no cookie, so proceed without a user being
+			// set, then return.
+			next.ServeHTTP(w, r)
+			return
+		}
+		user, err := umw.SessionService.User(token)
+		if err != nil {
+			// Invalid or expired token. In either case we can still proceed, we just
+			// cannot set a user.
+			next.ServeHTTP(w, r)
+			return
+		}
+		ctx := r.Context()
+		// We need to derive a new context to store values in it. Be certain that
+		// we import our own context package, and not the one from the standard
+		// library.
+		ctx = context.WithUser(ctx, user)
+		// Next we need to get a request that uses our new context. This is done
+		// in a way similar to how contexts work - we call a WithContext function
+		// and it returns us a new request with the context set.
+		r = r.WithContext(ctx)
+		// Finally we call the handler that our middleware was applied to with the
+		// updated request.
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (umw UserMiddleware) RequireUser(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := context.User(r.Context())
+		if user == nil {
+			http.Redirect(w, r, "/signin", http.StatusFound)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

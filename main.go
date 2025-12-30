@@ -57,6 +57,18 @@ func main() {
 		templates.FS, "signup.gohtml", "tailwind.gohtml"))
 	usersC.Templates.SignIn = views.Must(views.ParseFS(
 		templates.FS, "signin.gohtml", "tailwind.gohtml"))
+	csrfKey := os.Getenv("CSRF_KEY")
+	csrfMw := csrf.Protect(
+		[]byte(csrfKey),
+		csrf.Secure(false),
+		csrf.TrustedOrigins([]string{"localhost:3000", "127.0.0.1:3000"}),
+	)
+	umw := controllers.UserMiddleware{
+		SessionService: &sessionService,
+	}
+
+	r.Use(csrfMw)
+	r.Use(umw.SetUser)
 	r.Get("/", controllers.StaticHandler(views.Must(
 		views.ParseFS(templates.FS, "home.gohtml", "tailwind.gohtml"))))
 	r.Get("/contact", controllers.StaticHandler(views.Must(
@@ -67,17 +79,16 @@ func main() {
 	r.Get("/signin", usersC.SignIn)
 	r.Post("/signup", usersC.Create)
 	r.Post("/signin", usersC.ProcessSignIn)
-	r.Get("/users/me", usersC.CurrentUser)
-
+	r.With(umw.RequireUser).Post("/signout", usersC.ProcessSignOut)
+	r.Route("/users/me", func(r chi.Router) {
+		r.Use(umw.RequireUser)
+		r.Get("/", usersC.CurrentUser)
+	})
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Page not found", http.StatusNotFound)
 	})
+
 	fmt.Println("Starting the server on :3000...")
-	csrfKey := os.Getenv("CSRF_KEY")
-	csrfMw := csrf.Protect(
-		[]byte(csrfKey),
-		csrf.Secure(false),
-		csrf.TrustedOrigins([]string{"localhost:3000", "127.0.0.1:3000"}),
-	)
-	http.ListenAndServe(":3000", csrfMw(r))
+
+	http.ListenAndServe(":3000", r)
 }
